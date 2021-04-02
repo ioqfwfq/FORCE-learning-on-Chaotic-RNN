@@ -1,10 +1,10 @@
-function RNN_v04_1(varargin)
-% RNN_v04.1 A recurrent neural network with training
+function RNN_v04_2(varargin)
+% RNN_v04.2 A recurrent neural network with certain training phase
 % Ref: Susillo and Abbott, 2009
 % This version sets up the basic flow of the program, with FORCE training
 % It plots the activity of nGN and actual output z.
 % run by run_auto.m
-% Update: added training feature matrix P to update W.
+% Update: added training period turned on and turned off.
 
 % v01 by Emilio Salinas, January 2021
 % Junda Zhu, 2-19-2021
@@ -14,10 +14,10 @@ function RNN_v04_1(varargin)
 para = varargin{1};
 if length(para) ~= 5
     % network parameters
-    nGN = 150;     % number of generator (recurrent) neurons
+    nGN = 100;     % number of generator (recurrent) neurons
     tau = 10;    % membrane time constant, in ms
     % run parameters
-    Tmax = 1000;   % simulation time (in ms)
+    Tmax = 3000;   % training time (in ms)
     dt = 1;      % integration time step (in ms)
     nplot = 7;   % number of generator neurons to plot;
 else % parameters given by user input
@@ -45,6 +45,7 @@ W = randn(nGN,1)/sqrt(p_z*nGN); %output weight vector
 P = eye(nGN)/alpha; %update matrix
 z = 0; %output
 f = 0; %target
+eneg = 0;
 
 % set space for data to be plotted
 nTmax = Tmax/dt;
@@ -70,24 +71,41 @@ switch whichfunc
     case 4 % sine wave of period 60 ms or 8000 ms
         peri = 80*tau;
         func = @(t,peri)(sin(t/peri*2*pi));
-end       
+end     
 %% -------------
 % loop over time
 %---------------
 con = 'Y';
-T_start = 1;
+T_start = 2000;
 T_end = T_start + nTmax;
 t=0;
 while con ~= 'N'
     if con == 'Y'
+        for i=1:T_start-1
+            f = func(t,peri); % target function
+            H = tanh(x); % firing rates
+            z = W' * H; % output
+            dw = eneg * P * H; %dw
+            dxdt = -x/tau + J*H/tau + JGz*z/tau;
+            x = x + dxdt*dt;
+            t = t + dt;
+            
+            % save some data for plotting
+            tplot(i) = t;
+            Hplot(:,i) = H(1:nplot);
+            zplot(i) = z;
+            fplot(i) = f;
+            dwplot(i) = mean(abs(dw(:)));
+        end
+        tic
         % Main loop
-        for i=T_start:T_end 
+        for i=T_start:T_end
             f = func(t,peri); % target function
             H = tanh(x); % firing rates
             P = P - (P*H*H'*P)/(1+H'*P*H); % update P
             eneg = z - f; % error
-            
-            W = W - eneg * P * H; % update W
+            dw = eneg * P * H;
+            W = W - dw; % update W
             z = W' * H; % output
             epos = z - f; % error after update
             
@@ -102,9 +120,30 @@ while con ~= 'N'
             zplot(i) = z;
             fplot(i) = f;
             eplot(i) = epos - eneg;
+            dwplot(i) = mean(abs(dw(:)));
         end
-        
-        
+        toc
+        % Post training
+        for i=T_end+1:T_end+2000
+            f = func(t,peri); % target function
+            H = tanh(x); % firing rates
+            eneg = z - f;
+            z = W' * H; % output
+            epos = z - f;
+            
+            dxdt = -x/tau + J*H/tau + JGz*z/tau;
+            x = x + dxdt*dt;
+            t = t + dt;
+            
+            % save some data for plotting
+            tplot(i) = t;
+            Hplot(:,i) = H(1:nplot);
+            zplot(i) = z;
+            fplot(i) = f;
+            eplot(i) = epos - eneg;
+            dwplot(i) = norm(dw);
+        end
+        disp('plotting');
         % graph the results
         clrGN = 'k';
         clrOut = 'r';
@@ -115,35 +154,41 @@ while con ~= 'N'
         clf
         subplot(3,1,1)
         hold on
-        xlim([T_start T_end+1])
-        ylim([0.25 nplot+0.75])
-        set(gca, 'YTick', [1:nplot])
-        for ii=1:nplot
-            yoff = (ii-1) + 1;
-            plot(xlim, yoff*[1 1], ':', 'color', clr_grid)
-            %     plot(tplot, xplot(j,:)*sfac + yoff, '-', 'color', clrGN);
-            plot(tplot, Hplot(ii,:)*sfac + yoff, '-', 'color', clrGN, 'LineWidth', 1);
-        end
-        ylabel('Recurrent neuron');
-        xlabel('Time (ms)');
-        title(['RNN v03: ' num2str(nGN) ' neurons, with recurrence']);
-        
-        subplot(3,1,2)
-        hold on
-        xlim([T_start T_end+1])
+        xlim([0 T_end+2000])
         ylim([-1.2 1.2])
         set(gca, 'YTick', [-1, 0, 1])
+        line([T_start T_start],[-1.2, 1.2])
+        line([T_end T_end],[-1.2, 1.2])
         plot(tplot, fplot, '-', 'color', clrF, 'LineWidth', 2);
         plot(tplot, zplot, '-', 'color', clrOut, 'LineWidth', 2);
         ylabel('Output Unit');
         xlabel('Time (ms)');
+        title(['RNN v04: ' num2str(nGN) ' neurons, with recurrence and training']);
         
+        subplot(3,1,2)
+        hold on
+        xlim([0 T_end+2000])
+        ylim([0.25 nplot+0.75])
+        set(gca, 'YTick', [1:nplot])
+        for ii=1:nplot
+            yoff = (ii-1) + 1;
+            line([T_start T_start],[0.25, nplot+1])
+            line([T_end T_end],[0.25, nplot+1])
+            plot(xlim, yoff*[1 1], ':', 'color', clr_grid)
+            plot(tplot, Hplot(ii,:)*sfac + yoff, '-', 'color', clrGN, 'LineWidth', 1);
+        end
+        ylabel('Recurrent neuron');
+        xlabel('Time (ms)');
+                
         subplot(3,1,3)
         hold on
-        xlim([T_start T_end+1])
-        ylim([-0.1 0.1])
-        set(gca, 'YTick', 0)
-        plot(tplot, eplot, '.', 'color', clrGN, 'LineWidth', 1);
+        xlim([0 T_end+2000])
+        ylim([-0.15 0.15])
+        set(gca, 'YTick', [-0.1, 0, 0.1])
+        line([T_start T_start],[-1 1])
+        line([T_end T_end],[-1 1])
+        plot(tplot, eplot, '.', 'color', 'k');
+        plot(tplot, dwplot*10^2 - 0.15, '.', 'color', 'c');
         ylabel('\delta Error');
         xlabel('Time (ms)');
         
