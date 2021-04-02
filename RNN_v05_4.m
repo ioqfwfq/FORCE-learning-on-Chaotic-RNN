@@ -1,57 +1,56 @@
-function [maerr, rmserr, Wabs] = RNN_v05_3(varargin)
+function [maerr, rmserr, Wabs] = RNN_v05_4(varargin)
 % RNN_v05.1 A recurrent neural network with certain training phase
 % Ref: Susillo and Abbott, 2009
 % This version sets up the basic flow of the program, with FORCE training
 % It plots the activity of nGN and actual output z.
 % run by run_auto.m
-% Update: from v05.2, added p_GG as param input
+% Update: from v05.3, use GPU computing, change matrix to singles, skip
+% stationary networks
 
 % v01 by Emilio Salinas, January 2021
-% Junda Zhu, 3-15-2021
+% Junda Zhu, 3-17-2021
 % clear all
 %% parameters
 para = varargin{1};
-if length(para) ~= 6
+if length(para) ~= 8
     % network parameters
     nGN = 500;     % number of generator (recurrent) neurons
     tau = 10;    % membrane time constant, in ms
-    % run parameters
-    Tmax = 1000;   % training time (in ms)
-    dt = 1;      % integration time step (in ms)
-    g = 1.5;
     p_GG = 0.1; % p of non zero recurrence
+    p_z = 1; % p of non zero output
+    alpha = 1;
+    g = 1.5;
+    % run parameters
+    Tmax = 12000;   % training time (in ms)
+    dt = 1;      % integration time step (in ms)
+    
 else % parameters given by user input
     nGN = para(1);
     tau = para(2);
-    Tmax = para(3);
-    dt = para(4);
-    g = para(5);
-    p_GG = para(6);    
+    p_GG = para(3);
+    p_z = para(4); % p of non zero output
+    alpha = para(5);
+    g = para(6);
+    Tmax = para(7);
+    dt = para(8);
 end
 
-whichfunc = 4; % which target function used (1-4)
-p_z = 1; % p of non zero output
-alpha = 1;
+whichfunc = 2; % which target function used (1-4)
 %% initialize arrays
-x = 2*rand(nGN,1) - 1;
+isstationary = 1;
+while isstationary
+x = gpuArray(2*rand(nGN,1,'single') - 1);
 H = tanh(x);
-J = zeros(nGN);
-J(randperm(length(J(:)),p_GG*length(J(:)))) = randn(p_GG*length(J(:)),1)*g/sqrt(p_GG*nGN); %recurrent weight matrix
-W = randn(nGN,1)/sqrt(p_z*nGN); %output weight vector
-P = eye(nGN)/alpha; %update matrix
+J = gpuArray(zeros(nGN,'single'));
+J(randperm(round(length(J(:))),round(p_GG*length(J(:))))) = randn(round(p_GG*length(J(:))),1)*g/sqrt(p_GG*nGN); %recurrent weight matrix
+JGz = gpuArray(2*rand(nGN,1,'single')-1); %feedback weight matrix
+W = gpuArray(randn(nGN,1,'single')/sqrt(p_z*nGN)); %output weight vector
+P = gpuArray(eye(nGN,'single')/alpha); %update matrix
 z = 0; %output
 f = 0; %target
 eneg = 0;
 
-% set space for data to be plotted
-nTmax = Tmax/dt;
-% tplot = NaN(1, nTmax);
-% xplot = NaN(nplot, nTmax);
-% Hplot = NaN(nplot, nTmax);
-% zplot = NaN(1, nTmax);
-
-% Target function
-switch whichfunc
+switch whichfunc % Target function
     case 1 % triangular wave of period 600 ms
         peri = 600;
         func = @(t,peri)(2*triangle(2*pi*(1/peri)*t)-1);
@@ -68,33 +67,44 @@ switch whichfunc
         peri = 80*tau;
         func = @(t,peri)(sin(t/peri*2*pi));
 end
-%% -------------
-% loop over time
-%---------------
-% con = 'Y';
-T_start = 2;
+
+nTmax = Tmax/dt;
+T_start = peri * 2;
 T_end = T_start + nTmax;
 t=0;
-for it=1:T_end+5*Tmax % precompute target function
-    f(it) = func(it,peri);
-    fplot = f;
-end
-% while con ~= 'N'
-%     if con == 'Y'
+
+% set space for data to be plotted
+% tplot = NaN(1, nTmax);
+% xplot = NaN(nplot, nTmax);
+% Hplot = NaN(nplot, nTmax);
+zplot = gpuArray(NaN(1, T_end+5*Tmax));
+eplot = gpuArray(NaN(1, T_end+5*Tmax));
+
+%Pretraining
 for i=1:T_start-1
     H = tanh(x); % firing rates
     z = W' * H; % output
-    dw = eneg * P * H; %dw
-    dxdt = (-x + J*H) / tau;
+%     dw = - eneg * P * H; %dw
+    dxdt = (-x + J*H + JGz*z)/tau;
     x = x + dxdt*dt;
-    t = t + dt;
-    
-    % save some data for plotting
-    %             tplot(i) = t;
-    %             Hplot(:,i) = H(1:nplot);
-    %             zplot(i) = z;
-    %             dwplot(i) = norm(dw);
+    t = t + dt; 
+    % save data
+    %     tplot(i) = t;
+    %     Hplot(:,i) = H(1:nplot);
+        zplot(i) = z;
+    %     dwplot(i) = norm(dw);
 end
+if sum(zscore(zplot(T_start-1:-1:T_start-peri))) ~= 0
+    isstationary = 0;
+end
+end
+%% -------------
+% loop over time
+%--------------- 
+% Precompute target function
+it = 1:1:T_end+5*Tmax;
+f = gpuArray(func(it,peri));
+
 % Main loop
 for i=T_start:T_end
     H = tanh(x); % firing rates
@@ -120,13 +130,13 @@ for i=T_start:T_end
     %             dwplot(i) = norm(dw);
     %             dwplot(T_start) = 0;
 end
+
 % Post training
 for i=T_end+1:T_end+5*Tmax
     H = tanh(x); % firing rates
     eneg = z - f(i);
     z = W' * H; % output
-    %             epos = z - f(i);
-    
+    %             epos = z - f(i);    
     dxdt = (-x + J*H) / tau;
     x = x + dxdt*dt;
     t = t + dt;
@@ -140,17 +150,5 @@ for i=T_end+1:T_end+5*Tmax
 end
 maerr = mean(abs(eplot(T_end+4*Tmax+1:T_end+5*Tmax)));
 rmserr = sqrt(mean(eplot(T_end+4*Tmax+1:T_end+5*Tmax).^2));
-Wabs = norm(W);
-
-T_start = T_start + nTmax;
-T_end = T_start + nTmax;
-%     elseif con == 'N'
-%         break;
-%     else
-%         disp('Wrong input');
-%     end
-%     con = input('continue? [Y/N]:','s');
-%     if isempty(con)
-%         con = 'dumb';
-%     end
+Wabs = gather(norm(W));
 end
