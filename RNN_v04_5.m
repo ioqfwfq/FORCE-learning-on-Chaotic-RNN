@@ -1,43 +1,44 @@
-function [em, mae] = RNN_v04_4(varargin)
+function [maerr, rmserr, Wabs] = RNN_v04_5(varargin)
 % RNN_v04.2 A recurrent neural network with certain training phase
 % Ref: Susillo and Abbott, 2009
 % This version sets up the basic flow of the program, with FORCE training
+% only on W_out
 % run by run_auto_v04.m
-% Update: added posttraining RMS of error; no figure plot, return results
+% Update: addde g as param input
 
 % v01 by Emilio Salinas, January 2021
-% Junda Zhu, 2-19-2021
+% Junda Zhu, 3-15-2021
 % clear all
 %% parameters
 para = varargin{1};
-if length(para) ~= 4
+if length(para) ~= 5
     % network parameters
     nGN = 1000;     % number of generator (recurrent) neurons
     tau = 10;    % membrane time constant, in ms
     % run parameters
-    Tmax = 16000;   % training time (in ms)
+    Tmax = 12000;   % training time (in ms)
     dt = 1;      % integration time step (in ms)
+    g = 1.5;
 else % parameters given by user input
     nGN = para(1);
     tau = para(2);
     Tmax = para(3);
     dt = para(4);
+    g = para(5);
 end
 
-whichfunc = 2; % which target function used (1-4)
+whichfunc = 4; % which target function used (1-4)
 p_z = 1; % p of non zero output
-p_GG = 0.1; % p of non zero recurrence
 alpha = 1;
+p_GG = 0.1; % p of non zero recurrence
 %% initialize arrays
 x = 2*rand(nGN,1) - 1;
 H = tanh(x);
-g = 1.5;
 J = zeros(nGN);
 J(randperm(length(J(:)),p_GG*length(J(:)))) = randn(p_GG*length(J(:)),1)*g/sqrt(p_GG*nGN); %recurrent weight matrix
 JGz = 2*rand(nGN,1)-1; %feedback weight matrix
 W = randn(nGN,1)/sqrt(p_z*nGN); %output weight vector
 P = eye(nGN)/alpha; %update matrix
-P1 = P;
 z = 0; %output
 f = 0; %target
 eneg = 0;
@@ -100,12 +101,12 @@ for i=T_start:T_end
     PH = P*H;
     P = P - PH*PH'/(1+H'*PH); % update P
     eneg = z - f(i); % error
-    dw = eneg * P * H;
-    W = W - dw; % update W
+    dw = - eneg * P * H;
+    W = W + dw; % update W
     z = W' * H; % output
-    epos = z - f(i); % error after update
+%     epos = z - f(i); % error after update
     
-    dxdt = -x/tau + J*H/tau + JGz*z/tau;
+    dxdt = (-x + J*H + JGz*z)/tau;
     x = x + dxdt*dt;
     t = t + dt;
     
@@ -123,9 +124,9 @@ for i=T_end+1:T_end+5*Tmax
     H = tanh(x); % firing rates
     eneg = z - f(i);
     z = W' * H; % output
-    epos = z - f(i);
+%     epos = z - f(i);
     
-    dxdt = -x/tau + J*H/tau + JGz*z/tau;
+    dxdt = (-x + J*H + JGz*z)/tau;
     x = x + dxdt*dt;
     t = t + dt;
     
@@ -136,8 +137,9 @@ for i=T_end+1:T_end+5*Tmax
     eplot(i) = eneg;
 %     dwplot(i) = norm(dw);
 end
-em = sqrt(1/Tmax*(sum(eplot(T_end+4*Tmax+1:T_end+5*Tmax).^2)));
-mae = mean(abs(eplot(T_end+4*Tmax+1:T_end+5*Tmax)));
+maerr = mean(abs(eplot(T_end+4*Tmax+1:T_end+5*Tmax)));
+rmserr = sqrt(mean(eplot(T_end+4*Tmax+1:T_end+5*Tmax).^2));
+Wabs = norm(W);
 % disp('run finished');
 
 % T_start = T_start + nTmax;
