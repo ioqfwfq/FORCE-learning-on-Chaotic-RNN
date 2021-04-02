@@ -1,35 +1,36 @@
-function [maerr, rmserr, Wabs] = RNN_v05_2(varargin)
+function [maerr, rmserr, Wabs] = RNN_v05_3(varargin)
 % RNN_v05.1 A recurrent neural network with certain training phase
 % Ref: Susillo and Abbott, 2009
 % This version sets up the basic flow of the program, with FORCE training
 % It plots the activity of nGN and actual output z.
 % run by run_auto.m
-% Update: from v05.1, added posttraining RMS of error; no figure plot, return results
+% Update: from v05.2, added p_GG as param input
 
 % v01 by Emilio Salinas, January 2021
 % Junda Zhu, 3-15-2021
 % clear all
 %% parameters
 para = varargin{1};
-if length(para) ~= 5
+if length(para) ~= 6
     % network parameters
-    nGN = 1000;     % number of generator (recurrent) neurons
+    nGN = 500;     % number of generator (recurrent) neurons
     tau = 10;    % membrane time constant, in ms
     % run parameters
     Tmax = 1000;   % training time (in ms)
     dt = 1;      % integration time step (in ms)
     g = 1.5;
+    p_GG = 0.1; % p of non zero recurrence
 else % parameters given by user input
     nGN = para(1);
     tau = para(2);
     Tmax = para(3);
     dt = para(4);
     g = para(5);
+    p_GG = para(6);    
 end
 
 whichfunc = 4; % which target function used (1-4)
 p_z = 1; % p of non zero output
-p_GG = 0.1; % p of non zero recurrence
 alpha = 1;
 %% initialize arrays
 x = 2*rand(nGN,1) - 1;
@@ -83,7 +84,7 @@ end
 for i=1:T_start-1
     H = tanh(x); % firing rates
     z = W' * H; % output
-    dw = - eneg * P * H; %dw
+    dw = eneg * P * H; %dw
     dxdt = (-x + J*H) / tau;
     x = x + dxdt*dt;
     t = t + dt;
