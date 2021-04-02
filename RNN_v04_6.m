@@ -1,4 +1,4 @@
-function [maerr, rmserr, Wabs] = RNN_v04_5(varargin)
+function [maerr, rmserr, Wabs] = RNN_v04_6(varargin)
 % RNN_v04.2 A recurrent neural network with certain training phase
 % Ref: Susillo and Abbott, 2009
 % This version sets up the basic flow of the program, with FORCE training
@@ -11,7 +11,7 @@ function [maerr, rmserr, Wabs] = RNN_v04_5(varargin)
 % clear all
 %% parameters
 para = varargin{1};
-if length(para) ~= 5
+if length(para) ~= 6
     % network parameters
     nGN = 1000;     % number of generator (recurrent) neurons
     tau = 10;    % membrane time constant, in ms
@@ -19,23 +19,24 @@ if length(para) ~= 5
     Tmax = 12000;   % training time (in ms)
     dt = 1;      % integration time step (in ms)
     g = 1.5;
+    p_GG = 0.1; % p of non zero recurrence
 else % parameters given by user input
     nGN = para(1);
     tau = para(2);
     Tmax = para(3);
     dt = para(4);
     g = para(5);
+    p_GG = para(6);
 end
 
 whichfunc = 4; % which target function used (1-4)
 p_z = 1; % p of non zero output
 alpha = 1;
-p_GG = 0.1; % p of non zero recurrence
 %% initialize arrays
 x = 2*rand(nGN,1) - 1;
 H = tanh(x);
 J = zeros(nGN);
-J(randperm(length(J(:)),p_GG*length(J(:)))) = randn(p_GG*length(J(:)),1)*g/sqrt(p_GG*nGN); %recurrent weight matrix
+J(randperm(length(J(:)),p_GG*length(J(:)))) = randn(round(p_GG*length(J(:))),1)*g/sqrt(p_GG*nGN); %recurrent weight matrix
 JGz = 2*rand(nGN,1)-1; %feedback weight matrix
 W = randn(nGN,1)/sqrt(p_z*nGN); %output weight vector
 P = eye(nGN)/alpha; %update matrix
