@@ -1,23 +1,23 @@
-function RNN_v04_2(varargin)
+function RNN_v04_3(varargin)
 % RNN_v04.2 A recurrent neural network with certain training phase
 % Ref: Susillo and Abbott, 2009
 % This version sets up the basic flow of the program, with FORCE training
 % It plots the activity of nGN and actual output z.
 % run by run_auto.m
-% Update: added training period turned on and turned off.
+% Update: speed up the training process
 
 % v01 by Emilio Salinas, January 2021
 % Junda Zhu, 2-19-2021
-
+tic
 % clear all
 %% parameters
 para = varargin{1};
 if length(para) ~= 5
     % network parameters
-    nGN = 100;     % number of generator (recurrent) neurons
+    nGN = 1000;     % number of generator (recurrent) neurons
     tau = 10;    % membrane time constant, in ms
     % run parameters
-    Tmax = 3000;   % training time (in ms)
+    Tmax = 16000;   % training time (in ms)
     dt = 1;      % integration time step (in ms)
     nplot = 7;   % number of generator neurons to plot;
 else % parameters given by user input
@@ -30,7 +30,7 @@ end
 if nplot > nGN
     nplot = nGN;
 end
-whichfunc = 4; % which target function used (1-4)
+whichfunc = 2; % which target function used (1-4)
 p_z = 1; % p of non zero output
 p_GG = 0.1; % p of non zero recurrence
 alpha = 1;
@@ -71,7 +71,7 @@ switch whichfunc
     case 4 % sine wave of period 60 ms or 8000 ms
         peri = 80*tau;
         func = @(t,peri)(sin(t/peri*2*pi));
-end     
+end
 %% -------------
 % loop over time
 %---------------
@@ -79,10 +79,14 @@ con = 'Y';
 T_start = 2000;
 T_end = T_start + nTmax;
 t=0;
+for it=1:T_end+5*Tmax % precompute target function
+    f(it) = func(it,peri);
+    fplot = f;
+end
 while con ~= 'N'
     if con == 'Y'
+        toc
         for i=1:T_start-1
-            f = func(t,peri); % target function
             H = tanh(x); % firing rates
             z = W' * H; % output
             dw = eneg * P * H; %dw
@@ -94,20 +98,19 @@ while con ~= 'N'
             tplot(i) = t;
             Hplot(:,i) = H(1:nplot);
             zplot(i) = z;
-            fplot(i) = f;
-            dwplot(i) = mean(abs(dw(:)));
+            dwplot(i) = norm(dw);
         end
-        tic
+        toc
         % Main loop
         for i=T_start:T_end
-            f = func(t,peri); % target function
             H = tanh(x); % firing rates
-            P = P - (P*H*H'*P)/(1+H'*P*H); % update P
-            eneg = z - f; % error
+            PH = P*H;
+            P = P - P*(H*H')*P/(1+H'*PH); % update P
+            eneg = z - f(i); % error
             dw = eneg * P * H;
             W = W - dw; % update W
             z = W' * H; % output
-            epos = z - f; % error after update
+            epos = z - f(i); % error after update
             
             dxdt = -x/tau + J*H/tau + JGz*z/tau;
             x = x + dxdt*dt;
@@ -118,18 +121,16 @@ while con ~= 'N'
             xplot(:,i) = x(1:nplot);
             Hplot(:,i) = H(1:nplot);
             zplot(i) = z;
-            fplot(i) = f;
             eplot(i) = epos - eneg;
             dwplot(i) = mean(abs(dw(:)));
         end
         toc
         % Post training
-        for i=T_end+1:T_end+2000
-            f = func(t,peri); % target function
+        for i=T_end+1:T_end+5*Tmax
             H = tanh(x); % firing rates
-            eneg = z - f;
+            eneg = z - f(i);
             z = W' * H; % output
-            epos = z - f;
+            epos = z - f(i);
             
             dxdt = -x/tau + J*H/tau + JGz*z/tau;
             x = x + dxdt*dt;
@@ -139,10 +140,10 @@ while con ~= 'N'
             tplot(i) = t;
             Hplot(:,i) = H(1:nplot);
             zplot(i) = z;
-            fplot(i) = f;
             eplot(i) = epos - eneg;
             dwplot(i) = norm(dw);
         end
+        toc
         disp('plotting');
         % graph the results
         clrGN = 'k';
@@ -179,7 +180,7 @@ while con ~= 'N'
         end
         ylabel('Recurrent neuron');
         xlabel('Time (ms)');
-                
+        
         subplot(3,1,3)
         hold on
         xlim([0 T_end+2000])
