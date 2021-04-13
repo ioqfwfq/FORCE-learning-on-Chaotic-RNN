@@ -1,13 +1,12 @@
-function RNN_v06_2(varargin)
-% RNN_v06.2 A recurrent neural network with certain training phase
+function RNN_v06_3(varargin)
+% RNN_v06.3 A recurrent neural network with certain training phase
 % Ref: Susillo and Abbott, 2009
 % This version sets up the basic flow of the program, with FORCE training
 % It plots the activity of nGN and actual output z.
-% run by run_auto.m
-% Update: from v06.1, noisy input function to control decision-like output
+% Update: from v06.2, two pulse input function to control one output
 
 % v01 by Emilio Salinas, January 2021
-% Junda Zhu, 3-29-2021
+% Junda Zhu, 4-4-2021
 tic
 % clear all
 clf
@@ -15,9 +14,9 @@ clf
 para = varargin{1};
 if length(para) ~= 8
     % network parameters
-    nGN = 1200;     % number of generator (recurrent) neurons
+    nGN = 200;     % number of generator (recurrent) neurons
     tau = 10;    % membrane time constant, in ms
-    p_GG = 1; % p of non zero recurrence
+    p_GG = 0.1; % p of non zero recurrence
     p_z = 1; % p of non zero output
     alpha = 1;
     g = 1.5;
@@ -40,22 +39,18 @@ if nplot > nGN
     nplot = nGN;
 end
 
-numinput = 1;% number of input
-whichfunc = 2; % which target function used (1-4)
+numinput = 2;% number of input
 %% initialize arrays
 x = gpuArray(2*rand(nGN,1,'single') - 1);
-H = tanh(x);
 J = gpuArray(zeros(nGN,'single'));
 J(randperm(round(length(J(:))),round(p_GG*length(J(:))))) = randn(round(p_GG*length(J(:))),1)*g/sqrt(p_GG*nGN); %recurrent weight matrix
 JGz = gpuArray(2*rand(nGN,1,'single')-1); %feedback weight matrix
 I = gpuArray(zeros(numinput,1,'single'));
-JGi = gpuArray(zeros(nGN,length(I),'single'));
-% JGi(randperm(size(JGi,1),length(I))) = randn(length(I));
-JGi(randperm(size(JGi,1),p_GG*size(JGi,1))) = randn(p_GG*size(JGi,1),1);
+JGi = gpuArray(zeros(nGN,numinput,'single'));
+JGi(randperm(length(JGi(:)),p_GG*length(JGi(:)))) = randn(p_GG*length(JGi(:)),1);
 W = gpuArray(randn(nGN,1,'single')/sqrt(p_z*nGN)); %output weight vector
 P = gpuArray(eye(nGN,'single')/alpha); %update matrix
 z = 0; %output
-f = 0; %target
 eneg = 0;
 
 % set space for data to be plotted
@@ -66,35 +61,16 @@ Hplot = NaN(nplot, nTtrain);
 zplot = NaN(1, nTtrain);
 eplot = NaN(1, nTtrain);
 
-% Target function
-switch whichfunc
-    case 1 % triangular wave of period 600 ms
-        peri = 600;
-        func = @(t,peri)(2*triangle(2*pi*(1/peri)*t)-1);
-    case 2 % periodic function of period 1200 ms
-        peri = 1200*rand(1)+600;
-        func = @(t,peri)1/2*(sin(1.0*2*pi*(1/peri)*t) + ...
-            1/4*sin(2.0*2*pi*(1/peri)*t) + ...
-            1/12*sin(3.0*2*pi*(1/peri)*t) + ...
-            1/6*sin(4.0*2*pi*(1/peri)*t));
-    case 3 % square wave of period 600 ms
-        peri = 600;
-        func = @(t,peri)(2*(sin(t/peri*2*pi)>0)-1);
-    case 4 % sine wave of period 60 ms or 8000 ms
-        peri = 800*rand(1)+800;
-        func = @(t,peri)(sin(t/peri*2*pi));
-end
-
-
 %% before training
 T_start = 2001;
 T_end = T_start + nTtrain -1;
 t=0;
 
-I(1:T_start-1) = func(1:T_start-1,peri);
-f = zeros(size(I));
-f(I<=0) = -1;
-f(I>0) = 1;
+wid = 20; % 20 ms
+d = rand(6,1)*length(T_start:T_end);
+pul = rectpuls(1:length(T_start:T_end),wid);
+I = zeros(numinput,length(1:T_start-1));
+f(1:T_start-1) = -0.5;
 
 for i=1:T_start
     H = tanh(x); % firing rates
@@ -114,16 +90,26 @@ toc
 %% training
 con = 1;
 while con
+    tic
     % precompute target and input function
-    peri = 1200*rand(1)+600;
-    I(T_start:T_end) = func(T_start:T_end,peri);
-    f = zeros(size(I));
-    f(I<=0) = -0.5;
-    f(I>0) = 0.5;
+    wid = 20; % 20 ms
+    d = rand(10,1)*length(T_start:T_end);
+    pul = rectpuls(1:length(T_start:T_end),wid);
+    I(1,T_start:T_end) = pulstran(1:length(T_start:T_end),d(1:5),pul)';
+    I(2,T_start:T_end) = pulstran(1:length(T_start:T_end),d(6:10),pul)';
+    f(T_start:T_end) = 0;
     
     % Main loop
     dwplot(T_start) = 0;
     for i=T_start:T_end
+        f(i) = f(i-1);
+        if I(1,i)
+            f(i)=1;
+        end
+        if I(2,i)
+            f(i)=0;
+        end
+        
         H = tanh(x); % firing rates
         PH = P*H;
         P = P - PH*PH'/(1+H'*PH); % update P
@@ -133,7 +119,7 @@ while con
         J = J + repmat(dw', nGN, 1); %update J (recurrent)
         z = W' * H; % output
         epos = z - f(i); % error after update
-        dxdt = (-x + J*H + JGz*z + JGi*I(i)) / tau;
+        dxdt = (-x + J*H + JGz*z + JGi*I(:,i)) / tau;
         x = x + dxdt*dt;
         t = t + dt;
         
@@ -146,18 +132,28 @@ while con
     end
     toc
     % testing
-    peri = 1200*rand(1)+600;
-    I(T_end+1:T_end+Ttrain) = func(T_end+1:T_end+Ttrain,peri);
-    f = zeros(size(I));
-    f(I<=0) = 0;
-    f(I>0) = 1;
+    wid = 20; % 20 ms
+    d = rand(6,1)*length(T_end+1:T_end+Ttrain);
+    pul = rectpuls(1:length(T_end+1:T_end+Ttrain),wid);
+    I(1,T_end+1:T_end+Ttrain) = pulstran(1:length(T_end+1:T_end+Ttrain),d(1:3),pul)';
+    I(2,T_end+1:T_end+Ttrain) = pulstran(1:length(T_end+1:T_end+Ttrain),d(4:6),pul)';
+    f(T_end+1:T_end+Ttrain) = 0;
+    
     dwplot(T_end+1:T_end+Ttrain) = 0;
     for i = T_end+1:T_end+Ttrain
+        f(i) = f(i-1);
+        if I(1,i)
+            f(i)=1;
+        end
+        if I(2,i)
+            f(i)=0;
+        end
+        
         H = tanh(x); % firing rates
         eneg = z - f(i);
         z = W' * H; % output
         epos = z - f(i);
-        dxdt = (-x + J*H + JGz*z + JGi*I(i)) / tau;
+        dxdt = (-x + J*H + JGz*z + JGi*I(:,i)) / tau;
         x = x + dxdt*dt;
         t = t + dt;
         
@@ -196,7 +192,8 @@ while con
     ylim([-1.2 1.2])
     set(gca, 'YTick', [0, 1])
     patch([T_start T_start T_end T_end],[-1.2, 1.2, 1.2, -1.2],'r', 'FaceAlpha',0.1,'EdgeAlpha',0.1)
-    plot(tplot(T_start:T_end+Ttrain), I(T_start:T_end+Ttrain), '-b', 'LineWidth', 2);
+    plot(tplot(T_start:T_end+Ttrain), I(1,T_start:T_end+Ttrain), '-r', 'LineWidth', 2);
+    plot(tplot(T_start:T_end+Ttrain), I(2,T_start:T_end+Ttrain), '-b', 'LineWidth', 2);
     ylabel('Input Unit');
     xlabel('Time (ms)');
     
