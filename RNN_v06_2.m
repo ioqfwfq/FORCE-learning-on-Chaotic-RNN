@@ -1,14 +1,13 @@
-function RNN_v06_1(varargin)
-% RNN_v06.1 A recurrent neural network with certain training phase
+function RNN_v06_2(varargin)
+% RNN_v06.2 A recurrent neural network with certain training phase
 % Ref: Susillo and Abbott, 2009
 % This version sets up the basic flow of the program, with FORCE training
 % It plots the activity of nGN and actual output z.
 % run by run_auto.m
-% Update: from v05.1, apply FORCE to recurrent and Wout, and input function
-% to control the output
+% Update: from v06.1, noisy input function to control decision-like output
 
 % v01 by Emilio Salinas, January 2021
-% Junda Zhu, 3-26-2021
+% Junda Zhu, 3-29-2021
 tic
 % clear all
 clf
@@ -18,7 +17,7 @@ if length(para) ~= 8
     % network parameters
     nGN = 1200;     % number of generator (recurrent) neurons
     tau = 10;    % membrane time constant, in ms
-    p_GG = 0.1; % p of non zero recurrence
+    p_GG = 1; % p of non zero recurrence
     p_z = 1; % p of non zero output
     alpha = 1;
     g = 1.5;
@@ -36,7 +35,7 @@ else % parameters given by user input
     Ttrain = para(7);
     dt = para(8);
 end
-nplot = 6;
+nplot = 5;
 if nplot > nGN
     nplot = nGN;
 end
@@ -73,7 +72,7 @@ switch whichfunc
         peri = 600;
         func = @(t,peri)(2*triangle(2*pi*(1/peri)*t)-1);
     case 2 % periodic function of period 1200 ms
-        peri = 1200;
+        peri = 1200*rand(1)+600;
         func = @(t,peri)1/2*(sin(1.0*2*pi*(1/peri)*t) + ...
             1/4*sin(2.0*2*pi*(1/peri)*t) + ...
             1/12*sin(3.0*2*pi*(1/peri)*t) + ...
@@ -82,7 +81,7 @@ switch whichfunc
         peri = 600;
         func = @(t,peri)(2*(sin(t/peri*2*pi)>0)-1);
     case 4 % sine wave of period 60 ms or 8000 ms
-        peri = 80*tau;
+        peri = 800*rand(1)+800;
         func = @(t,peri)(sin(t/peri*2*pi));
 end
 
@@ -92,9 +91,10 @@ T_start = 2001;
 T_end = T_start + nTtrain -1;
 t=0;
 
-f(1:T_start-1) = func(1:T_start-1,peri);
-I(1:T_start-1) = reshape(repmat(randi([0 1],10,1),1,length(1:T_start-1)/10)',length(1:T_start-1),1);
-f(I==0) = 0;
+I(1:T_start-1) = func(1:T_start-1,peri);
+f = zeros(size(I));
+f(I<=0) = -1;
+f(I>0) = 1;
 
 for i=1:T_start
     H = tanh(x); % firing rates
@@ -115,9 +115,11 @@ toc
 con = 1;
 while con
     % precompute target and input function
-    f(T_start:T_end+Ttrain) = func(T_start:T_end+Ttrain,peri);
-    I(T_start:T_end+Ttrain) = reshape(repmat(randi([0 1],20,1),1,length(T_start:T_end+Ttrain)/20)',length(T_start:T_end+Ttrain),1);
-    f(I==0) = 0;
+    peri = 1200*rand(1)+600;
+    I(T_start:T_end) = func(T_start:T_end,peri);
+    f = zeros(size(I));
+    f(I<=0) = -0.5;
+    f(I>0) = 0.5;
     
     % Main loop
     dwplot(T_start) = 0;
@@ -144,6 +146,11 @@ while con
     end
     toc
     % testing
+    peri = 1200*rand(1)+600;
+    I(T_end+1:T_end+Ttrain) = func(T_end+1:T_end+Ttrain,peri);
+    f = zeros(size(I));
+    f(I<=0) = 0;
+    f(I>0) = 1;
     dwplot(T_end+1:T_end+Ttrain) = 0;
     for i = T_end+1:T_end+Ttrain
         H = tanh(x); % firing rates
@@ -174,7 +181,7 @@ while con
     subplot(4,1,1)
     hold on
     %     xlim([0 T_end+Ttrain])
-    ylim([-1.2 1.2])
+    ylim([-.2 1.2])
     set(gca, 'YTick', [-1, 0, 1])
     patch([T_start T_start T_end T_end],[-1.2, 1.2, 1.2, -1.2],'r', 'FaceAlpha',0.1,'EdgeAlpha',0.1)
     plot(tplot(T_start:T_end+Ttrain), f(T_start:T_end+Ttrain), '-', 'color', clrF, 'LineWidth', 2);
@@ -186,9 +193,9 @@ while con
     subplot(4,1,2)
     hold on
     %     xlim([0 T_end+Ttrain])
-    %         ylim([-1.2 1.2])
+    ylim([-1.2 1.2])
     set(gca, 'YTick', [0, 1])
-    patch([T_start T_start T_end T_end],[-0.2, 1.2, 1.2, -0.2],'r', 'FaceAlpha',0.1,'EdgeAlpha',0.1)
+    patch([T_start T_start T_end T_end],[-1.2, 1.2, 1.2, -1.2],'r', 'FaceAlpha',0.1,'EdgeAlpha',0.1)
     plot(tplot(T_start:T_end+Ttrain), I(T_start:T_end+Ttrain), '-b', 'LineWidth', 2);
     ylabel('Input Unit');
     xlabel('Time (ms)');
