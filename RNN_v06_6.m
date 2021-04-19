@@ -1,15 +1,15 @@
-function RNN_v06_5(varargin)
+function RNN_v06_6(varargin)
 % RNN_v06.5 A recurrent neural network with certain training phase
 % Ref: Susillo and Abbott, 2009
 % This version sets up the basic flow of the program, with FORCE training
 % only on Wout!
 % It plots the activity of nGN and actual output z.
-% Update: from v06.4, now with any pairs of pulse input function to control any output
+% Update: from v06.5, smoothed the input and target functions
 
 % v01 by Emilio Salinas, January 2021
-% Junda Zhu, 4-12-2021
+% Junda Zhu, 4-16-2021
 % clear all
-clf
+% clf
 %% parameters
 para = varargin{1};
 if length(para) ~= 8
@@ -17,11 +17,11 @@ if length(para) ~= 8
     nGN = 1200;     % number of generator (recurrent) neurons
     tau = 10;    % membrane time constant, in ms
     p_GG = 0.8; % p of non zero recurrence
-    p_z = 1; % p of non zero output
-    alpha = 1;
+    p_z = 0.8; % p of non zero output
+    alpha = 80;
     g = 1.5;
     % run parameters
-    Ttrain = 10000;   % training time (in ms)
+    Ttrain = 120000;   % training time (in ms)
     dt = 1;      % integration time step (in ms)
     
 else % parameters given by user input
@@ -39,7 +39,7 @@ if nplot > nGN
     nplot = nGN;
 end
 
-numoutput = 8;% number of output
+numoutput = 4;% number of output
 %% initialize arrays
 x = gpuArray(2*rand(nGN,1,'single') - 1);
 J = gpuArray(zeros(nGN,'single'));
@@ -61,12 +61,15 @@ Hplot = NaN(nplot, nTtrain);
 zplot = NaN(numoutput, nTtrain);
 eplot = NaN(1, nTtrain);
 
+f1 = figure('Name', 'Results');
+f2 = figure('Name', 'Performance');
+
 %% before training
 T_start = 2001;
 T_end = T_start + nTtrain -1;
 t=0;
 
-wid = 20; % 20 ms
+wid = 40; % 40 ms
 d = rand(6,1)*length(T_start:T_end);
 pul = rectpuls(1:length(T_start:T_end),wid);
 I = zeros(2*numoutput,length(1:T_start-1));
@@ -92,30 +95,31 @@ while con
     disp('Training Start');
     tic
     % target and input function
-    wid = 20; % 20 ms
-    
+    wid = 40; % 20 ms
     for ij = 1:numoutput
-        d = rand(length(T_start:T_end)/500,1)*length(T_start:T_end); % random time points for the inputs
+        d = randi([1, length(T_start:T_end)],length(T_start:T_end)/1000,1);% random time points for the input
         pul = rectpuls(1:length(T_start:T_end),wid); % pulses
-        I(2*ij-1,T_start:T_end) = pulstran(1:length(T_start:T_end),d(1:length(d)/2-1),pul)'; % On
-        I(2*ij,T_start:T_end) = pulstran(1:length(T_start:T_end),d(length(d):-1:length(d)/2),pul)'; % Off
-        
+        I(2*ij-1,T_start:T_end) = smooth(pulstran(1:length(T_start:T_end),d(1:length(d)/2-1),pul)',2,1); % On
+        I(2*ij,T_start:T_end) = smooth(pulstran(1:length(T_start:T_end),d(length(d):-1:length(d)/2),pul)',2,1); % Off
     end
     f = [f zeros(numoutput,length(T_start:T_end))-1]; % target function at -1
-    % Main loop
-    dwplot(T_start) = 0;
     for i=T_start:T_end
         f(:,i) = f(:,i-1);
         for ij = 1:numoutput
             if I(2*ij-1,i)
                 f(ij,i) = 1;
-                disp(['Training... ' num2str(i) 'ms / ' num2str(T_end) 'ms']);
             end
             if I(2*ij,i)
                 f(ij,i) = -1;
             end
         end
-        
+    end
+    for ij = 1:numoutput
+        f(ij,T_start:T_end) = smooth(f(ij,T_start-10:T_end-10),2,1);
+    end
+    % Main loop
+    dwplot(T_start) = 0;
+    for i=T_start:T_end
         H = tanh(x); % firing rates
         PH = P*H;
         P = P - PH*PH'/(1+H'*PH); % update P
@@ -139,28 +143,31 @@ while con
     disp('Training finished');
     toc
     % testing
-    wid = 20; % 20 ms
+    wid = 40; % 20 ms
     for ij = 1:numoutput
-        d = rand(length(T_end+1:T_end+Ttrain)/500,1)*length(T_end+1:T_end+Ttrain); % random time points for the inputs
+        d = randi([1, length(T_end+1:T_end+Ttrain)],length(T_end+1:T_end+Ttrain)/1000,1);% random time points for the input
         pul = rectpuls(1:length(T_end+1:T_end+Ttrain),wid); % pulses
-        I(2*ij-1,T_end+1:T_end+Ttrain) = pulstran(1:length(T_end+1:T_end+Ttrain),d(1:length(d)/2-1),pul)'; % On
-        I(2*ij,T_end+1:T_end+Ttrain) = pulstran(1:length(T_end+1:T_end+Ttrain),d(length(d):-1:length(d)/2),pul)'; % Off
+        I(2*ij-1,T_end+1:T_end+Ttrain) = smooth(pulstran(1:length(T_end+1:T_end+Ttrain),d(1:length(d)/2-1),pul)',2,1); % On
+        I(2*ij,T_end+1:T_end+Ttrain) = smooth(pulstran(1:length(T_end+1:T_end+Ttrain),d(length(d):-1:length(d)/2),pul)',2,1); % Off
     end
     f = [f zeros(numoutput,length(T_end+1:T_end+Ttrain))-1]; % target function at -1
-    dwplot(T_end+1:T_end+Ttrain) = 0;
-    
-    for i = T_end+1:T_end+Ttrain
+    for i=T_end+1:T_end+Ttrain
         f(:,i) = f(:,i-1);
         for ij = 1:numoutput
             if I(2*ij-1,i)
                 f(ij,i) = 1;
-                disp(['Testing... ' num2str(i) 'ms / ' num2str(T_end+Ttrain) 'ms']);
             end
             if I(2*ij,i)
                 f(ij,i) = -1;
             end
         end
-        
+    end
+    for ij = 1:numoutput
+        f(ij,T_end+1:T_end+Ttrain) = smooth(f(ij,T_end+1-10:T_end+Ttrain-10),2,1);
+    end
+    dwplot(T_end+1:T_end+Ttrain) = 0;
+    
+    for i = T_end+1:T_end+Ttrain  
         H = tanh(x); % firing rates
         eneg = z - f(:,i);
         z = W' * H; % output
@@ -186,7 +193,7 @@ while con
     clr_grid = 0.5*[1 1 1];
     sfac = 0.5;% scale factor for plotting activity one neuron per row
     
-    f1 = figure('Name', 'Results');
+figure(f1)
     title(['RNN v06: ' num2str(nGN) ' neurons, with input']);
     for ij = 1:numoutput
         subplot(2+numoutput,1,ij)
@@ -216,8 +223,8 @@ while con
     ylabel('Recurrent neurons');
     xlabel('Time (ms)');
     
-    f2 = figure('Name', 'Performance');
-    subplot(2+numoutput,1,2+numoutput)
+    figure(f2)
+%     subplot(2+numoutput,1,2+numoutput)
     hold on
     %     xlim([0 T_end+Ttrain])
     ylim([-0.15 0.15])
